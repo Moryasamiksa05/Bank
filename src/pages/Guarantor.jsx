@@ -85,7 +85,6 @@ function RenderFields({
             </Grid>
           );
         }
-
         if (f.type === "file") {
           return (
             <Grid key={f.name} item xs={12} sm={f.full?12:6}>
@@ -98,7 +97,6 @@ function RenderFields({
             </Grid>
           );
         }
-
         if (f.type === "radio") {
           return (
             <Grid key={f.name} item xs={12} sm={f.full?12:6}>
@@ -112,7 +110,6 @@ function RenderFields({
             </Grid>
           );
         }
-
         return (
           <Grid key={f.name} item xs={12} sm={f.full?12:6}>
             <TextField
@@ -131,7 +128,6 @@ function RenderFields({
     </Grid>
   );
 }
-
 export default function Guarantor(){
   const [members,setMembers]=useState([]),
         [filtered,setFiltered]=useState([]),
@@ -148,8 +144,7 @@ export default function Guarantor(){
         [activeGuarantor,setActiveGuarantor]=useState(0),
         [viewOpen,setViewOpen]=useState(false),
         [viewData,setViewData]=useState(null);
-
-  useEffect(()=>{
+useEffect(()=>{
     const saved = localStorage.getItem("members");
     if (saved) { const p = JSON.parse(saved); setMembers(p); setFiltered(p); }
     else {
@@ -159,17 +154,14 @@ export default function Guarantor(){
       }).catch(()=>{ setMembers([]); setFiltered([]); });
     }
   },[]);
-
-  useEffect(()=>{ if (members.length) localStorage.setItem("members", JSON.stringify(members)); }, [members]);
-
-  useEffect(()=>{
+ useEffect(()=>{ if (members.length) localStorage.setItem("members", JSON.stringify(members)); }, [members]);
+ useEffect(()=>{
     const q = search.trim().toLowerCase();
     let res = members.filter(m => `${m.name||""} ${m.memberId||""} ${m.email||""} ${m.mobile||""}`.toLowerCase().includes(q));
     if (status) res = res.filter(m => (m.status||"").toLowerCase() === status.toLowerCase());
     setFiltered(res);
   }, [search, status, members]);
-
-  const handleChange = (i, f, v) => {
+const handleChange = (i, f, v) => {
     setForm(p => {
       const c = [...p];
       c[i] = { ...c[i], [f]: v };
@@ -192,14 +184,12 @@ export default function Guarantor(){
       return c;
     });
   };
-
-  const handleFileChange = (i, f, e) => {
+const handleFileChange = (i, f, e) => {
     const file = e.target.files?.[0]; if (!file) return;
     setForm(p => { const a = [...p]; a[i] = { ...a[i], [f]: file }; return a; });
     setPreviews(p => { const a = [...p]; a[i] = { ...a[i], [f]: URL.createObjectURL(file) }; return a; });
   };
-
-  // Add guarantor dialog opener - check existing count
+// Add guarantor dialog opener - check existing count
   const openAddGuarantorDialog = () => {
     if (!selected) { alert("Select a member first."); return; }
     const existing = (selected.guarantors || []).length;
@@ -207,35 +197,74 @@ export default function Guarantor(){
       alert("This member already has maximum 3 guarantors.");
       return;
     }
-    
     setForm([{}, {}, {}]);
     setPreviews([{}, {}, {}]);
     setStep(0);
     setActiveGuarantor(0);
     setOpen(true);
   };
-
   const submit = () => {
     if (!selected) { alert("Please select a member first."); return; }
-    const toSave = formData.reduce((acc, g, i) => {
+    // build new guarantors from formData
+    const toSaveRaw = formData.reduce((acc, g, i) => {
       const has = (g.name && String(g.name).trim()) || (g.membershipId && String(g.membershipId).trim()) || (g.mobile && String(g.mobile).trim());
       if (has) {
         const c = { ...g };
+        // convert file objects to their preview URL for storage (same behaviour as before)
         ["photo","chequeCopy","passbook"].forEach(f => { if (c[f] instanceof File) c[f] = previews[i]?.[f] || ""; });
         acc.push(c);
       }
       return acc;
     }, []);
-    if (!toSave.length) { alert("Please fill at least one guarantor before submitting!"); return; }
 
-    const existingCount = (selected.guarantors || []).length;
-    if (existingCount + toSave.length > 3) {
-      alert(`Cannot add ${toSave.length} guarantor(s). This member already has ${existingCount} guarantor(s). Maximum allowed is 3.`);
+    if (!toSaveRaw.length) { alert("Please fill at least one guarantor before submitting!"); return; }
+
+    const existing = selected.guarantors || [];
+
+    // Create quick lookup for existing guarantors by membershipId or mobile
+    const existingKeys = new Set();
+    existing.forEach(ex => {
+      const k1 = ex.membershipId ? `id:${String(ex.membershipId)}` : null;
+      const k2 = ex.mobile ? `m:${String(ex.mobile)}` : null;
+      if (k1) existingKeys.add(k1);
+      if (k2) existingKeys.add(k2);
+    });
+
+    // Filter out duplicates (both against existing and duplicates within the new batch)
+    const seenNew = new Set();
+    const uniqueNew = toSaveRaw.filter(g => {
+      const kId = g.membershipId ? `id:${String(g.membershipId)}` : null;
+      const kMobile = g.mobile ? `m:${String(g.mobile)}` : null;
+
+      // if either key exists in existing, skip
+      if ((kId && existingKeys.has(kId)) || (kMobile && existingKeys.has(kMobile))) {
+        console.warn('Skipping duplicate (already exists):', g);
+        return false;
+      }
+
+      // if duplicate within the batch
+      if (kId && seenNew.has(kId)) { console.warn('Skipping duplicate in batch (membershipId):', g); return false; }
+      if (kMobile && seenNew.has(kMobile)) { console.warn('Skipping duplicate in batch (mobile):', g); return false; }
+
+      if (kId) seenNew.add(kId);
+      if (kMobile) seenNew.add(kMobile);
+
+      return true;
+    });
+
+    if (!uniqueNew.length) {
+      alert("All entered guarantors already exist for this member or were duplicates in your input.");
+      return;
+    }
+
+    const existingCount = existing.length;
+    if (existingCount + uniqueNew.length > 3) {
+      alert(`Cannot add ${uniqueNew.length} guarantor(s). This member already has ${existingCount} guarantor(s). Maximum allowed is 3.`);
       return;
     }
 
     const updated = members.map(m => String(m.memberId) === String(selected.memberId)
-      ? { ...m, guarantors: [...(m.guarantors||[]), ...toSave] }
+      ? { ...m, guarantors: [...(m.guarantors||[]), ...uniqueNew] }
       : m
     );
 
@@ -244,14 +273,12 @@ export default function Guarantor(){
     // update selected reference to the updated member object so UI shows new guarantors
     const newSelected = updated.find(m => String(m.memberId) === String(selected.memberId));
     setSelected(newSelected || selected);
-
     setSnack(true);
     setForm([{}, {}, {}]);
     setPreviews([{}, {}, {}]);
     setStep(0);
     setActiveGuarantor(0);
   };
-
   const renderPreview = (data, i, usePrev=false) => {
     const allFields = Object.values(fieldConfig).flat().map(f=>f.name).filter((v,i,a)=>a.indexOf(v)===i);
     return (
@@ -270,7 +297,6 @@ export default function Guarantor(){
       </Grid>
     );
   };
-
   const renderStep = (data, i) => fieldConfig[step] ? (
     <RenderFields
       fields={fieldConfig[step]}
@@ -359,7 +385,6 @@ export default function Guarantor(){
           </Card>
         ))}
       </Box>
-
       <Dialog open={open} onClose={()=>setOpen(false)} fullWidth maxWidth="md">
         <DialogTitle>
           Add Guarantor {selected?`for ${selected.name}`:""}
@@ -369,13 +394,10 @@ export default function Guarantor(){
           <Tabs value={activeGuarantor} onChange={(e,v)=>{ setActiveGuarantor(v); setStep(0); }} sx={{ mb:2 }}>
             <Tab label="Guarantor 1"/><Tab label="Guarantor 2"/><Tab label="Guarantor 3"/>
           </Tabs>
-
           <Stepper activeStep={step} alternativeLabel>
             {steps.map(s => <Step key={s}><StepLabel>{s}</StepLabel></Step>)}
           </Stepper>
-
           <Box mt={2}>{renderStep(formData[activeGuarantor], activeGuarantor)}</Box>
-
           <Box mt={2} display="flex" justifyContent="space-between">
             <Button disabled={step === 0} onClick={() => setStep(s => Math.max(0, s - 1))}>Back</Button>
             <Box>
@@ -394,7 +416,6 @@ export default function Guarantor(){
           </Box>
         </DialogContent>
       </Dialog>
-
       <Dialog open={viewOpen} onClose={()=>setViewOpen(false)} fullWidth maxWidth="md">
         <DialogTitle>
           Guarantor Details
@@ -402,10 +423,10 @@ export default function Guarantor(){
         </DialogTitle>
         <DialogContent>{viewData && renderPreview(viewData, 0, false)}</DialogContent>
       </Dialog>
-
       <Snackbar open={snack} autoHideDuration={3000} onClose={()=>setSnack(false)} anchorOrigin={{ vertical:"bottom", horizontal:"center" }}>
         <Alert severity="success" onClose={()=>setSnack(false)}>Guarantor saved successfully!</Alert>
       </Snackbar>
     </Box>
   );
 }
+
